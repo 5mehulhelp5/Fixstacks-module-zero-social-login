@@ -8,6 +8,7 @@
         <zero_social_login>
             <general>
                 <enabled>0</enabled>
+                <link_email_template>zero_social_login_general_link_email_template</link_email_template>
             </general>
             <google>
                 <enabled>0</enabled>

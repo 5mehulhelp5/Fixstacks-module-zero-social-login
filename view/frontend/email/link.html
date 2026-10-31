@@ -1,0 +1,17 @@
+<!--@subject {{trans "Connect %provider to your %store account" provider=$provider store=$store_name}} @-->
+<!--@vars {
+"var name":"Customer name",
+"var provider":"Sign-in service",
+"var provider_email":"Email at the service",
+"var confirm_url":"Link that connects the service",
+"var store_name":"Store name"
+} @-->
+{{template config_path="design/email/header_template"}}
+
+<p>{{trans "Hello %name," name=$name}}</p>
+<p>{{trans "Someone just tried to sign in to your %store account with %provider (%email). If it was you, open this link within an hour to connect %provider to your account:" store=$store_name provider=$provider email=$provider_email}}</p>
+<p><a href="{{var confirm_url}}">{{trans "Connect %provider" provider=$provider}}</a></p>
+<p>{{trans "If your email address was never confirmed with us, connecting also removes the account's other sign-in services and signs it out on every device, so only you can get in."}}</p>
+<p>{{trans "If it wasn't you, ignore this email: nothing changes."}}</p>
+
+{{template config_path="design/email/footer_template"}}

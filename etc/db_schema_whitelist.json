@@ -17,5 +17,26 @@
             "ZERO_SOCIAL_LOGIN_IDENTITY_CUSTOMER_ID_PROVIDER": true,
             "ZERO_SOCIAL_LOGIN_IDENTITY_CUSTOMER_ID_CUSTOMER_ENTITY_ENTITY_ID": true
         }
+    },
+    "zero_social_login_link": {
+        "column": {
+            "link_id": true,
+            "customer_id": true,
+            "provider": true,
+            "subject": true,
+            "email": true,
+            "token_hash": true,
+            "created_at": true,
+            "expires_at": true
+        },
+        "index": {
+            "ZERO_SOCIAL_LOGIN_LINK_EXPIRES_AT": true
+        },
+        "constraint": {
+            "PRIMARY": true,
+            "ZERO_SOCIAL_LOGIN_LINK_TOKEN_HASH": true,
+            "ZERO_SOCIAL_LOGIN_LINK_CUSTOMER_ID_PROVIDER": true,
+            "ZERO_SOCIAL_LOGIN_LINK_CUSTOMER_ID_CUSTOMER_ENTITY_ENTITY_ID": true
+        }
     }
 }

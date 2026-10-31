@@ -1,0 +1,8 @@
+<?xml version="1.0"?>
+<!--
+    Copyright © 2026 Roman Pasichnyk
+    SPDX-License-Identifier: OSL-3.0 OR AFL-3.0
+-->
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:module:Magento_Email:etc/email_templates.xsd">
+    <template id="zero_social_login_general_link_email_template" label="Social Login: Connect a Sign-In Service" file="link.html" type="html" module="Zero_SocialLogin" area="frontend"/>
+</config>

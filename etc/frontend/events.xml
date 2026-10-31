@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<!--
+    Copyright © 2026 Roman Pasichnyk
+    SPDX-License-Identifier: OSL-3.0 OR AFL-3.0
+-->
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:framework:Event/etc/events.xsd">
+    <!-- A password sign-in on the storefront completes a service this account tried in the same browser (Model\PendingLink). -->
+    <event name="customer_customer_authenticated">
+        <observer name="zero_social_login_complete_pending_link" instance="Zero\SocialLogin\Observer\CompleteLinkOnPasswordSignIn"/>
+    </event>
+</config>

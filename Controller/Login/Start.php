@@ -48,11 +48,13 @@ class Start implements HttpGetActionInterface
      */
     public function execute()
     {
-        $provider = $this->pool->getAvailableProvider((string) $this->request->getParam('provider'));
+        $providerParam = $this->request->getParam('provider');
+        $provider = $this->pool->getAvailableProvider(is_scalar($providerParam) ? (string) $providerParam : '');
         if (!$provider) {
             return $this->forwardFactory->create()->forward('noroute');
         }
-        $from = (string) $this->request->getParam('from');
+        $from = $this->request->getParam('from');
+        $from = is_scalar($from) ? (string) $from : '';
         $from = in_array($from, self::FROM, true) ? $from : 'login';
         if ($this->customerSession->isLoggedIn()) {
             $flow = $this->flows->start(

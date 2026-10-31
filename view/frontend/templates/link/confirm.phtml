@@ -1,0 +1,36 @@
+<?php
+/**
+ * Copyright © 2026 Roman Pasichnyk
+ * SPDX-License-Identifier: OSL-3.0 OR AFL-3.0
+ *
+ * The emailed connect link's page: what connecting does, and a POST form
+ * (with the form key) that does it.
+ *
+ * @var \Magento\Framework\View\Element\Template $block
+ * @var \Magento\Framework\Escaper $escaper
+ * @var \Zero\SocialLogin\ViewModel\LinkConfirm $viewModel
+ */
+$viewModel = $block->getData('viewModel');
+$request = $viewModel->getRequest();
+?>
+<div class="zero-social-login-link max-w-2xl flex flex-col gap-4">
+    <?php if (!$request): ?>
+        <p class="text-sm"><?= $escaper->escapeHtml(__('This link has expired or was used already. Continue with the service again to get a new one.')) ?></p>
+    <?php else: ?>
+        <p>
+            <?= $escaper->escapeHtml(__('Connect %1 (%2) to the account %3?', $request['label'], $request['provider_email'], $request['email'])) ?>
+        </p>
+        <p class="text-sm text-base-content/70">
+            <?php if ($request['reset']): ?>
+                <?= $escaper->escapeHtml(__('The account\'s email address was never confirmed, so connecting also removes its other sign-in services and signs it out on every device. Afterwards you sign in with %1.', $request['label'])) ?>
+            <?php else: ?>
+                <?= $escaper->escapeHtml(__('Afterwards you can sign in with %1 too.', $request['label'])) ?>
+            <?php endif; ?>
+        </p>
+        <form method="post" action="<?= $escaper->escapeUrl($viewModel->getPostUrl()) ?>" class="flex flex-wrap items-center gap-4">
+            <input type="hidden" name="form_key" value="<?= $escaper->escapeHtmlAttr($viewModel->getFormKey()) ?>">
+            <button type="submit" class="btn btn-primary"><?= $escaper->escapeHtml(__('Connect %1', $request['label'])) ?></button>
+            <a class="link text-sm" href="<?= $escaper->escapeUrl($viewModel->getCancelUrl()) ?>"><?= $escaper->escapeHtml(__('Not now')) ?></a>
+        </form>
+    <?php endif; ?>
+</div>

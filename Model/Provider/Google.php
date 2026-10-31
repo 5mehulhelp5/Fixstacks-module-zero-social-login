@@ -70,7 +70,8 @@ class Google implements ProviderInterface
         $clientId = $this->config->getValue(self::CODE, 'client_id');
         $token = $this->http->postForm(self::TOKEN_URL, [
             'grant_type' => 'authorization_code',
-            'code' => (string) ($params['code'] ?? ''),
+            // An array (code[]=x) counts as no code: the provider refuses it, never a 500.
+            'code' => is_scalar($params['code'] ?? null) ? (string) $params['code'] : '',
             'redirect_uri' => $redirectUri,
             'client_id' => $clientId,
             'client_secret' => $this->config->getSecret(self::CODE, 'client_secret'),

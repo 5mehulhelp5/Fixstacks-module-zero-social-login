@@ -69,7 +69,8 @@ class Facebook implements ProviderInterface
             'client_id' => $this->config->getValue(self::CODE, 'app_id'),
             'client_secret' => $secret,
             'redirect_uri' => $redirectUri,
-            'code' => (string) ($params['code'] ?? ''),
+            // An array (code[]=x) counts as no code: the provider refuses it, never a 500.
+            'code' => is_scalar($params['code'] ?? null) ? (string) $params['code'] : '',
             'code_verifier' => $flow->codeVerifier,
         ]);
         $accessToken = $token['access_token'] ?? null;

@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<!--
+    Copyright © 2026 Roman Pasichnyk
+    SPDX-License-Identifier: OSL-3.0 OR AFL-3.0
+
+    The page of the emailed connect link (never cached: the block is not).
+-->
+<page xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" layout="1column"
+      xsi:noNamespaceSchemaLocation="urn:magento:framework:View/Layout/etc/page_configuration.xsd">
+    <body>
+        <referenceContainer name="content">
+            <block class="Magento\Framework\View\Element\Template" name="zero.social.login.link.confirm"
+                   template="Zero_SocialLogin::link/confirm.phtml" cacheable="false">
+                <arguments>
+                    <argument name="viewModel" xsi:type="object">Zero\SocialLogin\ViewModel\LinkConfirm</argument>
+                </arguments>
+            </block>
+        </referenceContainer>
+    </body>
+</page>

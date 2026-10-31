@@ -22,11 +22,20 @@ use PHPUnit\Framework\TestCase;
 use Zero\SocialLogin\Model\Authenticator;
 use Zero\SocialLogin\Model\Confirmation;
 use Zero\SocialLogin\Model\IdentityStore;
+use Zero\SocialLogin\Model\LinkMailer;
+use Zero\SocialLogin\Model\LinkPendingException;
+use Zero\SocialLogin\Model\LinkRequests;
 use Zero\SocialLogin\Model\LoginException;
+use Zero\SocialLogin\Model\Password;
 use Zero\SocialLogin\Model\Profile;
 use Zero\SocialLogin\Model\Provider\Pool;
+use Zero\SocialLogin\Model\Provider\ProviderInterface;
 
 /**
+ * A service sign-in never takes over an existing account by email (A5-10, P6-1): an account with a password waits
+ * for a sign-in in this browser (no email), one without gets an emailed link; the success message names the
+ * account's other services by label only (R-B7-5).
+ *
  * The collaborators are mocks so each test can add expectations to the ones it is about.
  */
 #[AllowMockObjectsWithoutExpectations]
@@ -38,6 +47,10 @@ class AuthenticatorTest extends TestCase
     private CustomerInterfaceFactory&MockObject $customerFactory;
     private Share&MockObject $share;
     private Confirmation&MockObject $confirmation;
+    private Password&MockObject $password;
+    private LinkRequests&MockObject $linkRequests;
+    private LinkMailer&MockObject $linkMailer;
+    private Pool $pool;
     /** @var array<int, CustomerInterface> */
     private array $byId = [];
     /** @var array<string, CustomerInterface> */
@@ -58,6 +71,23 @@ class AuthenticatorTest extends TestCase
         $this->share = $this->createMock(Share::class);
         $this->confirmation = $this->createMock(Confirmation::class);
         $this->confirmation->method('isPending')->willReturnCallback(fn ($c) => (string) $c->getConfirmation() !== '');
+        $this->password = $this->createMock(Password::class);
+        $this->linkRequests = $this->createMock(LinkRequests::class);
+        $this->linkMailer = $this->createMock(LinkMailer::class);
+        $this->pool = new Pool([
+            'google' => $this->provider('Google'),
+            'facebook' => $this->provider('Facebook'),
+            'apple' => $this->provider('Apple'),
+        ]);
+    }
+
+    private function provider(string $label): ProviderInterface
+    {
+        $provider = $this->createStub(ProviderInterface::class);
+        $provider->method('getLabel')->willReturn($label);
+        $provider->method('isAvailable')->willReturn(true);
+
+        return $provider;
     }
 
     private function authenticator(): Authenticator
@@ -76,7 +106,10 @@ class AuthenticatorTest extends TestCase
             $storeManager,
             $this->share,
             $this->confirmation,
-            new Pool()
+            $this->pool,
+            $this->password,
+            $this->linkRequests,
+            $this->linkMailer
         );
     }
 
@@ -98,12 +131,34 @@ class AuthenticatorTest extends TestCase
         return new Profile('google', 'g-1', $email, $verified, $first, $first !== '' ? 'Lee' : '');
     }
 
+    /**
+     * Nothing connects, nobody is signed in and no account is made or confirmed.
+     */
+    private function expectNoSignIn(): void
+    {
+        $this->identities->expects($this->never())->method('add');
+        $this->identities->expects($this->never())->method('touch');
+        $this->accounts->expects($this->never())->method('createAccount');
+        $this->confirmation->expects($this->never())->method('confirm');
+    }
+
+    private function pending(callable $call): LinkPendingException
+    {
+        try {
+            $call();
+        } catch (LinkPendingException $e) {
+            return $e;
+        }
+        $this->fail('LinkPendingException expected');
+    }
+
     public function testConnectedAccountSignsIn(): void
     {
         $customer = $this->customer(7, 'old@example.com');
         $this->identities->method('findCustomerIds')->with('google', 'g-1')->willReturn([7]);
         $this->identities->expects($this->never())->method('add');
         $this->identities->expects($this->once())->method('touch')->with(7);
+        $this->linkRequests->expects($this->never())->method('create');
 
         $this->assertSame($customer, $this->authenticator()->login($this->profile()));
     }
@@ -119,26 +174,82 @@ class AuthenticatorTest extends TestCase
         $this->assertSame($created, $this->authenticator()->login($this->profile()));
     }
 
-    public function testVerifiedEmailConnectsTheExistingAccount(): void
+    public function testVerifiedEmailOnAPasswordAccountWaitsForASignInAndSendsNoEmail(): void
     {
-        $customer = $this->customer(5, 'ann@example.com');
+        $this->customer(5, 'ann@example.com');
         $this->identities->method('findCustomerIds')->willReturn([]);
         $this->identities->method('forCustomer')->willReturn([]);
-        $this->identities->expects($this->once())->method('add')->with(5);
-        $this->accounts->expects($this->never())->method('createAccount');
+        $this->password->expects($this->once())->method('has')->with(5)->willReturn(true);
+        $this->linkRequests->expects($this->never())->method('create');
+        $this->linkMailer->expects($this->never())->method('send');
+        $this->expectNoSignIn();
 
-        $this->assertSame($customer, $this->authenticator()->login($this->profile()));
+        $e = $this->pending(fn () => $this->authenticator()->login($this->profile()));
+
+        $this->assertSame(5, $e->customerId);
+        $this->assertFalse($e->emailed);
+        $this->assertSame(
+            'An account with ann@example.com already exists. To connect Google, sign in now with your password'
+            . ' (forgot it? Use "Forgot Your Password?", then sign in) or with a service already connected to it.',
+            $e->getMessage()
+        );
+    }
+
+    public function testVerifiedEmailOnAPasswordlessAccountEmailsALinkAndSignsNobodyIn(): void
+    {
+        $customer = $this->customer(5, 'ann@example.com');
+        $profile = $this->profile();
+        $this->identities->method('findCustomerIds')->willReturn([]);
+        $this->identities->method('forCustomer')->willReturn([]);
+        $this->password->method('has')->with(5)->willReturn(false);
+        $this->linkRequests->expects($this->once())->method('create')->with(5, $profile)->willReturn('TOKEN');
+        $this->linkMailer->expects($this->once())->method('send')->with($customer, $profile, 'TOKEN');
+        $this->expectNoSignIn();
+
+        $e = $this->pending(fn () => $this->authenticator()->login($profile));
+
+        $this->assertSame(5, $e->customerId);
+        $this->assertTrue($e->emailed);
+        $this->assertSame(
+            'An account with ann@example.com already exists. To connect Google, open the link we\'ve emailed to'
+            . ' ann@example.com, or sign in now with a service already connected to it.',
+            $e->getMessage()
+        );
+    }
+
+    public function testExistingUnconfirmedAccountIsNotConfirmedBySocialSignIn(): void
+    {
+        $this->customer(5, 'ann@example.com', 1, 'confirm-key');
+        $this->identities->method('findCustomerIds')->willReturn([]);
+        $this->identities->method('forCustomer')->willReturn([]);
+        $this->password->method('has')->willReturn(true);
+        $this->confirmation->expects($this->never())->method('sendLink');
+        $this->expectNoSignIn();
+
+        $e = $this->pending(fn () => $this->authenticator()->login($this->profile()));
+
+        $this->assertSame(5, $e->customerId);
     }
 
     public function testUnverifiedEmailNeverTakesOverAnExistingAccount(): void
     {
         $this->customer(5, 'ann@example.com');
         $this->identities->method('findCustomerIds')->willReturn([]);
-        $this->identities->expects($this->never())->method('add');
+        $this->password->expects($this->never())->method('has');
+        $this->linkRequests->expects($this->never())->method('create');
+        $this->linkMailer->expects($this->never())->method('send');
+        $this->expectNoSignIn();
 
-        $this->expectException(LoginException::class);
-        $this->expectExceptionMessage('Sign in with your password');
-        $this->authenticator()->login($this->profile(false));
+        try {
+            $this->authenticator()->login($this->profile(false));
+            $this->fail('LoginException expected');
+        } catch (LoginException $e) {
+            $this->assertNotInstanceOf(LinkPendingException::class, $e, 'no pending link for an unverified email');
+            $this->assertSame(
+                'An account with ann@example.com already exists. Sign in with your password, then connect Google under My Account > Sign-In Methods.',
+                $e->getMessage()
+            );
+        }
     }
 
     public function testExistingAccountWithAnotherAccountOfTheSameServiceIsNotOverwritten(): void
@@ -146,10 +257,20 @@ class AuthenticatorTest extends TestCase
         $this->customer(5, 'ann@example.com');
         $this->identities->method('findCustomerIds')->willReturn([]);
         $this->identities->method('forCustomer')->willReturn(['google' => ['identity_id' => 1]]);
-        $this->identities->expects($this->never())->method('add');
+        $this->linkRequests->expects($this->never())->method('create');
+        $this->linkMailer->expects($this->never())->method('send');
+        $this->expectNoSignIn();
 
-        $this->expectException(LoginException::class);
-        $this->authenticator()->login($this->profile());
+        try {
+            $this->authenticator()->login($this->profile());
+            $this->fail('LoginException expected');
+        } catch (LoginException $e) {
+            $this->assertNotInstanceOf(LinkPendingException::class, $e);
+            $this->assertSame(
+                'Your account is already connected to a different Google account. Disconnect it under My Account > Sign-In Methods first.',
+                $e->getMessage()
+            );
+        }
     }
 
     public function testNoEmailNoAccount(): void
@@ -158,6 +279,7 @@ class AuthenticatorTest extends TestCase
         $this->accounts->expects($this->never())->method('createAccount');
 
         $this->expectException(LoginException::class);
+        $this->expectExceptionMessage('Your Google account didn\'t share an email address with us.');
         $this->authenticator()->login($this->profile(true, ''));
     }
 
@@ -166,6 +288,7 @@ class AuthenticatorTest extends TestCase
         $this->identities->method('findCustomerIds')->willReturn([]);
         $created = $this->expectNewAccount('Ann Lee', '-');
         $this->identities->expects($this->once())->method('add')->with(9);
+        $this->linkRequests->expects($this->never())->method('create');
 
         $this->assertSame($created, $this->authenticator()->login($this->profile(true, 'ann.lee@example.com', '')));
     }
@@ -197,8 +320,10 @@ class AuthenticatorTest extends TestCase
         $this->customer(7, 'other@example.com');
         $this->identities->method('findCustomerIds')->willReturn([7]);
         $this->identities->expects($this->never())->method('add');
+        $this->linkRequests->expects($this->never())->method('cancel');
 
         $this->expectException(LoginException::class);
+        $this->expectExceptionMessage('This Google account is already connected to another account in our store.');
         $this->authenticator()->link($this->profile(), 5);
     }
 
@@ -211,6 +336,94 @@ class AuthenticatorTest extends TestCase
 
         $this->authenticator()->link($this->profile(false), 5);
         $this->authenticator()->link($this->profile(false), 5);
+    }
+
+    public function testLinkFromMyAccountCancelsAPendingEmailLink(): void
+    {
+        $this->identities->method('findCustomerIds')->willReturn([]);
+        $this->identities->method('forCustomer')->willReturn([]);
+        $calls = [];
+        $this->identities->method('add')->willReturnCallback(function () use (&$calls) {
+            $calls[] = 'add';
+        });
+        $this->linkRequests->expects($this->once())->method('cancel')->with(5, 'google')
+            ->willReturnCallback(function () use (&$calls) {
+                $calls[] = 'cancel';
+            });
+
+        $this->authenticator()->link($this->profile(), 5);
+
+        $this->assertSame(['add', 'cancel'], $calls, 'the emailed link stops working once the service is connected');
+    }
+
+    public function testLinkToAnotherServiceAccountOfTheSameProviderCancelsNothing(): void
+    {
+        $this->identities->method('findCustomerIds')->willReturn([]);
+        $this->identities->method('forCustomer')->willReturn(['google' => ['identity_id' => 3]]);
+        $this->identities->expects($this->never())->method('add');
+        $this->linkRequests->expects($this->never())->method('cancel');
+
+        $this->expectException(LoginException::class);
+        $this->expectExceptionMessage('already connected to a different Google account');
+        $this->authenticator()->link($this->profile(), 5);
+    }
+
+    public function testConnectedMessageWithNoOtherServiceIsThePlainMessage(): void
+    {
+        $this->identities->method('forCustomer')->with(5)->willReturn([
+            'google' => ['identity_id' => 11, 'provider' => 'google', 'email' => 'ann@example.com'],
+        ]);
+
+        $this->assertSame(
+            'Google is connected. You can now sign in with it.',
+            (string) $this->authenticator()->connectedMessage(5, 'google')
+        );
+    }
+
+    public function testConnectedMessageNamesEveryServiceSortedByLabelAndNothingElse(): void
+    {
+        $this->identities->method('forCustomer')->with(5)->willReturn([
+            'google' => ['identity_id' => 11, 'provider' => 'google', 'email' => 'ann@example.com'],
+            'facebook' => ['identity_id' => 12, 'provider' => 'facebook', 'email' => 'stranger@evil.example'],
+            'apple' => ['identity_id' => 13, 'provider' => 'apple', 'email' => 'relay@privaterelay.appleid.com'],
+        ]);
+
+        $message = (string) $this->authenticator()->connectedMessage(5, 'google');
+
+        $this->assertSame(
+            'Google is connected. You can now sign in with it. Connected services: Apple, Facebook, Google.'
+            . ' If you don\'t recognise one, disconnect it under My Account > Sign-In Methods.',
+            $message
+        );
+        foreach (['ann@example.com', 'stranger@evil.example', 'relay@', '11', '12', '13'] as $secret) {
+            $this->assertStringNotContainsString($secret, $message, 'labels only, never ids or emails');
+        }
+    }
+
+    public function testConnectedMessageFallsBackToTheCodeOfAServiceMissingFromThePool(): void
+    {
+        $this->identities->method('forCustomer')->willReturn([
+            'google' => ['identity_id' => 11],
+            'linkedin' => ['identity_id' => 14],
+        ]);
+
+        $this->assertStringContainsString(
+            'Connected services: Google, linkedin.',
+            (string) $this->authenticator()->connectedMessage(5, 'google')
+        );
+        $this->assertStringStartsWith(
+            'yahoo is connected.',
+            (string) $this->authenticator()->connectedMessage(5, 'yahoo'),
+            'the connected service itself is missing from the Pool too'
+        );
+    }
+
+    public function testPasswordFirstNamesTheService(): void
+    {
+        $this->assertSame(
+            'This account has a password. Sign in with it (or reset it with "Forgot Your Password?" and sign in), then connect Apple under My Account > Sign-In Methods.',
+            (string) Authenticator::passwordFirst('Apple')
+        );
     }
 
     private function expectNewAccount(string $first = 'Ann', string $last = 'Lee'): CustomerInterface

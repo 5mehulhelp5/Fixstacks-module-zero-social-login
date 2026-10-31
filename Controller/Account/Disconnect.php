@@ -43,7 +43,8 @@ class Disconnect implements HttpPostActionInterface
         }
         $redirect = $this->redirectFactory->create()->setPath('sociallogin/account');
         $customerId = (int) $this->customerSession->getCustomerId();
-        $code = (string) $this->request->getParam('provider');
+        $code = $this->request->getParam('provider');
+        $code = is_scalar($code) ? (string) $code : '';
         $label = $this->pool->get($code)?->getLabel() ?? $code;
         if (!$this->account->canDisconnect($code)) {
             $this->messageManager->addErrorMessage(__(

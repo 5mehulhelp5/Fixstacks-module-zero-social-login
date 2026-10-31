@@ -24,6 +24,8 @@ Composer installs `zerofront/module-zero-core`, `zerofront/module-zero-checkout`
 
 Part of [`zerofront/zero`](https://zerofront.dev), which installs the Zero theme and every Zero module at once.
 
+What changed in each release: [CHANGELOG.md](CHANGELOG.md).
+
 ## License
 
 OSL-3.0 or AFL-3.0, your choice: see `NOTICE.md`.

@@ -27,7 +27,9 @@ use Psr\Log\LoggerInterface;
 use Zero\SocialLogin\Model\Authenticator;
 use Zero\SocialLogin\Model\Flow;
 use Zero\SocialLogin\Model\FlowStore;
+use Zero\SocialLogin\Model\LinkPendingException;
 use Zero\SocialLogin\Model\LoginException;
+use Zero\SocialLogin\Model\PendingLink;
 use Zero\SocialLogin\Model\Profile;
 use Zero\SocialLogin\Model\Provider\Pool;
 use Zero\SocialLogin\Model\ServiceException;
@@ -61,13 +63,15 @@ class Callback implements HttpGetActionInterface, HttpPostActionInterface, CsrfA
         private readonly UrlInterface $url,
         private readonly CookieManagerInterface $cookieManager,
         private readonly CookieMetadataFactory $cookieMetadataFactory,
-        private readonly LoggerInterface $logger
+        private readonly LoggerInterface $logger,
+        private readonly PendingLink $pendingLink
     ) {
     }
 
     public function execute(): ResultInterface
     {
-        $code = (string) $this->request->getParam('provider');
+        $code = $this->request->getParam('provider');
+        $code = is_scalar($code) ? (string) $code : '';
         if ($this->request->isPost()) {
             $query = [];
             foreach (self::POST_PARAMS as $name) {
@@ -82,7 +86,8 @@ class Callback implements HttpGetActionInterface, HttpPostActionInterface, CsrfA
                 ->setUrl($this->urls->callback($code) . '?' . http_build_query($query));
         }
 
-        $flow = $this->flows->take((string) $this->request->getParam('state'));
+        $stateParam = $this->request->getParam('state');
+        $flow = $this->flows->take(is_scalar($stateParam) ? (string) $stateParam : '');
         $provider = $this->pool->getAvailableProvider($code);
         if (!$flow || !$provider || $flow->provider !== $code) {
             $this->messageManager->addErrorMessage(
@@ -118,6 +123,18 @@ class Callback implements HttpGetActionInterface, HttpPostActionInterface, CsrfA
         }
         try {
             $customer = $this->authenticator->login($profile);
+        } catch (LinkPendingException $e) {
+            // An existing account: connected after a sign-in here, or by the emailed link.
+            $this->pendingLink->remember($e->customerId, $profile);
+            $this->messageManager->addNoticeMessage($e->getMessage());
+            $this->eventManager->dispatch('zero_sociallogin_link_pending', [
+                'flow' => $flow,
+                'profile' => $profile,
+                'customer_id' => $e->customerId,
+                'emailed' => $e->emailed,
+            ]);
+
+            return $this->redirect($flow->from === 'checkout' ? 'zero/checkout/index' : 'customer/account/login');
         } catch (LoginException $e) {
             $this->messageManager->addErrorMessage($e->getMessage());
 
@@ -134,8 +151,19 @@ class Callback implements HttpGetActionInterface, HttpPostActionInterface, CsrfA
         }
 
         $this->customerSession->setCustomerDataAsLoggedIn($customer);
+        // A service of this account waiting for a sign-in here is connected now.
+        $connected = $this->pendingLink->complete((int) $customer->getId());
 
         // Other front ends (a headless storefront) follow this login from here.
+        if ($connected !== null) {
+            // The success message (with the account's services) is a session message of this theme;
+            // a headless storefront learns of the connect from this event.
+            $this->eventManager->dispatch('zero_sociallogin_link_completed', [
+                'customer_id' => (int) $customer->getId(),
+                'label' => $connected,
+                'flow' => $flow,
+            ]);
+        }
 
         $this->eventManager->dispatch('zero_sociallogin_login', ['customer' => $customer, 'flow' => $flow, 'profile' => $profile]);
         // As core's loginPost: the browser's private content cache belongs to the guest.
@@ -163,7 +191,9 @@ class Callback implements HttpGetActionInterface, HttpPostActionInterface, CsrfA
         }
         try {
             $this->authenticator->link($profile, (int) $flow->customerId);
-            $this->messageManager->addSuccessMessage(__('%1 is connected. You can now sign in with it.', $label));
+            $this->messageManager->addSuccessMessage(
+                $this->authenticator->connectedMessage((int) $flow->customerId, $profile->provider)
+            );
         } catch (LoginException $e) {
             $this->messageManager->addErrorMessage($e->getMessage());
         }

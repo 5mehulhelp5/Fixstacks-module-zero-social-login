@@ -74,7 +74,8 @@ class Apple implements ProviderInterface
         $clientId = $this->config->getValue(self::CODE, 'client_id');
         $token = $this->http->postForm(self::TOKEN_URL, [
             'grant_type' => 'authorization_code',
-            'code' => (string) ($params['code'] ?? ''),
+            // An array (code[]=x) counts as no code: the provider refuses it, never a 500.
+            'code' => is_scalar($params['code'] ?? null) ? (string) $params['code'] : '',
             'redirect_uri' => $redirectUri,
             'client_id' => $clientId,
             'client_secret' => $this->clientSecret->create(
@@ -88,7 +89,7 @@ class Apple implements ProviderInterface
             throw new ServiceException('Apple: no ID token');
         }
         $claims = $this->idToken->claims($token['id_token'], self::ISSUERS, $clientId, $flow->nonce);
-        $user = json_decode((string) ($params['user'] ?? ''), true);
+        $user = json_decode(is_scalar($params['user'] ?? null) ? (string) $params['user'] : '', true);
         $name = is_array($user) && is_array($user['name'] ?? null) ? $user['name'] : [];
 
         return new Profile(
