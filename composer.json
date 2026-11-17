@@ -2,7 +2,7 @@
     "name": "zerofront/module-zero-social-login",
     "description": "Zero for Magento Open Source: sign in and sign up with Google, Apple or Facebook, without third-party libraries.",
     "type": "magento2-module",
-    "version": "1.3.10",
+    "version": "1.3.11",
     "license": [
         "OSL-3.0",
         "AFL-3.0"
@@ -33,8 +33,8 @@
         "magento/module-paypal": "*",
         "magento/module-persistent": "*",
         "magento/module-store": "*",
-        "zerofront/module-zero-core": "^1.3.10",
-        "zerofront/module-zero-checkout": "^1.3.10"
+        "zerofront/module-zero-core": "^1.3.11",
+        "zerofront/module-zero-checkout": "^1.3.11"
     },
     "replace": {
         "fixstacks/module-zero-social-login": "self.version"
